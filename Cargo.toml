@@ -1,0 +1,26 @@
+[package]
+name = "fx-mq-jobs"
+version = "0.1.0"
+edition = "2024"
+authors = ["Jakob Lilliemarck <lilliemarckjakob@gmail.com>"]
+description = "High-level job queue implementation using fx-mq-building-blocks"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jakob-lilliemarck/fx-mq-jobs"
+keywords = ["async", "jobs", "queue", "message-queue", "worker"]
+categories = ["database", "asynchronous"]
+
+[dependencies]
+fx-mq-building-blocks = { git = "https://github.com/jakob-lilliemarck/fx-mq-building-blocks.git" }
+sqlx = { version = "0.8", features = ["macros", "migrate", "runtime-tokio", "tls-rustls-ring", "postgres", "chrono", "uuid"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.134"
+futures = "0.3.31"
+const-fnv1a-hash = "1.1"
+uuid = { version = "1.14.0", features = ["serde", "v7"] }
+tracing = "0.1.41"
+chrono = "0.4.39"
+thiserror = "2.0.12"
+tokio = { version = "1.42.0", features = ["rt-multi-thread", "macros", "full", "tracing"] }
+
+[dev-dependencies]
+anyhow = "1.0.95"
