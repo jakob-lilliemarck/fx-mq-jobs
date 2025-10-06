@@ -70,13 +70,13 @@ git tag "v$new_version" -m "Release v$new_version"
 
 # --- Dry-run publishing ---
 echo "Performing dry-run to check package..."
-cargo publish --dry-run
+SQLX_OFFLINE=true cargo publish --dry-run
 
 # --- Confirm publishing ---
 read -p "Dry-run succeeded. Do you want to publish for real? [y/N] " confirm
 if [[ "$confirm" =~ ^[Yy]$ ]]; then
   echo "Publishing crate..."
-  cargo publish
+  SQLX_OFFLINE=true cargo publish
   echo "✅ Crate published successfully!"
 
   # Push the tag to remote
