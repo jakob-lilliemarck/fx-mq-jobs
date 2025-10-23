@@ -136,7 +136,14 @@ async fn run_worker(mut worker: Worker) -> Result<(), WorkerError> {
     while let Some(command) = worker.rx.recv().await {
         match command {
             WorkerCommand::Work { message, confirm } => {
-                worker.work(message, confirm).await?;
+                if let Err(e) = worker.work(message, confirm).await {
+                    tracing::error!(
+                        worker_id = worker.id,
+                        error = ?e,
+                        "Worker failed to process message"
+                    );
+                    return Err(e);
+                }
             }
             WorkerCommand::Stop { confirm } => {
                 confirm
@@ -166,7 +173,9 @@ pub enum WorkerHandleError {
 ///
 /// Provides async communication with the worker task for sending work and shutdown commands.
 pub(crate) struct WorkerHandle {
+    id: usize,
     tx: mpsc::Sender<WorkerCommand>,
+    tx_idle: mpsc::Sender<usize>,
     join_handle: JoinHandle<Result<(), WorkerError>>,
 }
 
@@ -186,18 +195,41 @@ impl WorkerHandle {
         let (tx, rx) = mpsc::channel(1);
 
         // Clone for move into spawned task
-        let tx_idle = tx_idle.clone();
+        let tx_idle_worker = tx_idle.clone();
+        let tx_idle_handle = tx_idle.clone();
         let registry = registry.clone();
         let queries = queries.clone();
         let pool = pool.clone();
 
         let join_handle = tokio::spawn(async move {
-            let worker = Worker::new(id, tx_idle, rx, registry, queries, pool).await?;
+            let worker = Worker::new(id, tx_idle_worker, rx, registry, queries, pool).await?;
 
-            run_worker(worker).await
+            let result = run_worker(worker).await;
+
+            if let Err(e) = &result {
+                tracing::error!(
+                    worker_id = id,
+                    error = ?e,
+                    "Worker task exited with error"
+                );
+            } else {
+                tracing::info!(worker_id = id, "Worker task exited normally");
+            }
+
+            result
         });
 
-        Ok(Self { tx, join_handle })
+        Ok(Self {
+            id,
+            tx,
+            join_handle,
+            tx_idle: tx_idle_handle,
+        })
+    }
+
+    /// Signals that this worker is idle and available for work.
+    pub(crate) async fn idle(&self) -> Result<(), mpsc::error::SendError<usize>> {
+        self.tx_idle.send(self.id).await
     }
 
     /// Sends a message to the worker for processing.
@@ -233,7 +265,9 @@ impl WorkerHandle {
     #[tracing::instrument(skip(self), fields(timeout_ms = timeout.as_millis()), level = "debug")]
     pub(crate) async fn stop(self, timeout: Duration) -> Result<(), WorkerHandleError> {
         // Destructure to avoid ownership conflicts in tokio::select
-        let WorkerHandle { tx, join_handle } = self;
+        let WorkerHandle {
+            tx, join_handle, ..
+        } = self;
         let abort_handle = join_handle.abort_handle();
 
         tokio::select! {

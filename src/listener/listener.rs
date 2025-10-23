@@ -238,19 +238,20 @@ impl Listener {
         // Wait for an idle worker to become available
         let idle_worker_idx = match self.rx_idle.recv().await {
             None => {
-                // Getting None means the channel is closed.
-                // We can not work without workers, so we must exit the listen loop
-                // Not sure if its an error or not yet
-                return Ok(None);
+                // Channel closed - all workers exited
+                tracing::error!("All workers disconnected");
+                return Err(ListenerError::IdleChannel);
             }
             Some(idle) => idle,
         };
 
+        // Get the worker handle
         let worker = self
             .handles
             .get(idle_worker_idx)
             .expect("Getting handle by index returned None");
 
+        // Query database for messages
         let mut tx = self.pool.begin().await?;
 
         // Priority 1: Brand new jobs that haven't been attempted yet (fastest to process)
@@ -274,12 +275,16 @@ impl Listener {
             .await?
         {
             message
-        // No jobs available - return empty handed
         } else {
+            // No jobs available - return worker to idle pool
+            if let Err(e) = worker.idle().await {
+                tracing::error!("Failed to return worker to idle pool: {}", e);
+            }
+
             return Ok(None);
         };
 
-        // keep the event id for later use
+        // Wait for the worker to accept the message (this only wait for the worker to confirm, not for the entire work duration)
         let message_id = worker.work(message).await?;
 
         // Commit the transaction after we know the worker accepted the message
@@ -344,7 +349,7 @@ mod tests {
         // Publish a message that will succeed directly
         let _published_3 = publisher.publish(&succeeding).await?;
 
-        let mut listener = Listener::new(pool, registry, 4, host_id, hold_for).await?;
+        let mut listener = Listener::new(pool, registry, 1, host_id, hold_for).await?;
 
         let (tx_stop, rx_stop) = oneshot::channel::<()>();
         let listen_handle = tokio::spawn(async move {
