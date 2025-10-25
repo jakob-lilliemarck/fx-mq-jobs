@@ -1,6 +1,6 @@
 [package]
 name = "fx-mq-jobs"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["Jakob Lilliemarck <lilliemarckjakob@gmail.com>"]
 description = "High-level job queue implementation using fx-mq-building-blocks"
