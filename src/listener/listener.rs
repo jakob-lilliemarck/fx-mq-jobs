@@ -349,7 +349,7 @@ mod tests {
         // Publish a message that will succeed directly
         let _published_3 = publisher.publish(&succeeding).await?;
 
-        let mut listener = Listener::new(pool, registry, 1, host_id, hold_for).await?;
+        let mut listener = Listener::new(pool, registry, 4, host_id, hold_for).await?;
 
         let (tx_stop, rx_stop) = oneshot::channel::<()>();
         let listen_handle = tokio::spawn(async move {
