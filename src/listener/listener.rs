@@ -251,44 +251,44 @@ impl Listener {
             .get(idle_worker_idx)
             .expect("Getting handle by index returned None");
 
-        // Query database for messages
-        let mut tx = self.pool.begin().await?;
+        // Acquire message in a short transaction
+        let message = {
+            let mut tx = self.pool.begin().await?;
 
-        // Priority 1: Brand new jobs that haven't been attempted yet (fastest to process)
-        let message = if let Some(message) = self
-            .queries
-            .get_next_unattempted(&mut tx, now, self.host_id, self.hold_for)
-            .await?
-        {
-            message
-        // Priority 2: Jobs that failed but are ready to retry (within retry limits)
-        } else if let Some(message) = self
-            .queries
-            .get_next_retryable(&mut tx, now, self.host_id, self.hold_for)
-            .await?
-        {
-            message
-        // Priority 3: Jobs with expired leases (likely from crashed workers)
-        } else if let Some(message) = self
-            .queries
-            .get_next_missing(&mut tx, now, self.host_id, self.hold_for)
-            .await?
-        {
-            message
-        } else {
-            // No jobs available - return worker to idle pool
-            if let Err(e) = worker.idle().await {
-                tracing::error!("Failed to return worker to idle pool: {}", e);
-            }
+            let message = if let Some(message) = self
+                .queries
+                .get_next_unattempted(&mut tx, now, self.host_id, self.hold_for)
+                .await?
+            {
+                message
+            } else if let Some(message) = self
+                .queries
+                .get_next_retryable(&mut tx, now, self.host_id, self.hold_for)
+                .await?
+            {
+                message
+            } else if let Some(message) = self
+                .queries
+                .get_next_missing(&mut tx, now, self.host_id, self.hold_for)
+                .await?
+            {
+                message
+            } else {
+                tx.commit().await?;
+                if let Err(e) = worker.idle().await {
+                    tracing::error!("Failed to return worker to idle pool: {}", e);
+                }
+                return Ok(None);
+            };
 
-            return Ok(None);
+            // Commit the transaction
+            // The transaction _must_ be commited before we pass the message to the worker not to race this transaction against reporting on message handling.
+            tx.commit().await?;
+            message
         };
 
         // Wait for the worker to accept the message (this only wait for the worker to confirm, not for the entire work duration)
         let message_id = worker.work(message).await?;
-
-        // Commit the transaction after we know the worker accepted the message
-        tx.commit().await?;
 
         Ok(Some(message_id))
     }
