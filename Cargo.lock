@@ -432,9 +432,9 @@ dependencies = [
 
 [[package]]
 name = "fx-mq-building-blocks"
-version = "0.1.4"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36876e38def22ba684cf1f7a956616621415c78f49cb3f8a9d8fc23ae2356b41"
+checksum = "98c2e8a9f616488d97ac2d2ded9bca2c704238c6afe599e053b9e21742cb51d1"
 dependencies = [
  "anyhow",
  "chrono",

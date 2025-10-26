@@ -11,5 +11,7 @@ pub use lease_renewer::{LeaseRenewalError, LeaseRenewer};
 pub use listener::listener::Listener;
 pub use publisher::{PublishError, Publisher};
 
+pub use fx_mq_building_blocks::{models::Message, queries::Queries};
+
 #[cfg(test)]
 pub mod test_tools;
