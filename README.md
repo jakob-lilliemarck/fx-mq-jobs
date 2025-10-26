@@ -15,6 +15,9 @@ Built for deployments where every host can handle all job types - no separate qu
 - Not an event bus. Jobs are **commands** (imperative) that execute specific actions, not **events** (declarative) that multiple handlers observe.
 
 ## Usage
+**IMPORTANT** - Running blocking code within job handlers may starve the listener. If you need to run blocking jobs in your handler, ensure the listener runs in a separate thread. Blocking the listener will cause long running transactions, and will trigger sqlx slow query warnings in the logs.
+
+### Configure the listener
 ```rust
 use fx_jobs::{Handler, RegistryBuilder, Listener, LeaseRenewer};
 
@@ -70,7 +73,7 @@ let mut listener = Listener::new(
 listener.listen().await?;
 ```
 
-## Publishing Jobs
+### Publishing Jobs
 
 ```rust
 let publisher = Publisher::new(&pool, &queries);
