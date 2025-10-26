@@ -24,3 +24,7 @@ tokio = { version = "1.42.0", features = ["rt-multi-thread", "macros", "full", "
 
 [dev-dependencies]
 anyhow = "1.0.95"
+
+[[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
