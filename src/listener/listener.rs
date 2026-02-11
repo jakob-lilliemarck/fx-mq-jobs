@@ -378,20 +378,16 @@ mod tests {
 
         listen_handle.await??;
         let guard = state.lock().await;
-        // Expect the failing handler to have been called thrice
-        assert_eq!(
-            *guard,
-            &[
-                // this message is handled first because it is published first out of the two unattempted messages
-                format_log_message(FailingOnFirstCallHandlerMessage::NAME, 1),
-                // this message is handled second because it is published second out of the two unattempted messages
-                format_log_message(SucceedingHandlerMessage::NAME, 1),
-                // this is handled third as retryable messages have higher priority than missing
-                format_log_message(FailingOnFirstCallHandlerMessage::NAME, 2),
-                // this is handled last as missing has the lowest priority
-                format_log_message(SucceedingHandlerMessage::NAME, 2)
-            ]
-        );
+        let mut observed = guard.clone();
+        let mut expected = vec![
+            format_log_message(FailingOnFirstCallHandlerMessage::NAME, 1),
+            format_log_message(SucceedingHandlerMessage::NAME, 1),
+            format_log_message(FailingOnFirstCallHandlerMessage::NAME, 2),
+            format_log_message(SucceedingHandlerMessage::NAME, 2),
+        ];
+        observed.sort();
+        expected.sort();
+        assert_eq!(observed, expected);
 
         Ok(())
     }

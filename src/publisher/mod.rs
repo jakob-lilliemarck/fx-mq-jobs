@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
 use fx_mq_building_blocks::models::{Message, RawMessage};
 use fx_mq_building_blocks::queries::Queries;
 use sqlx::{PgPool, PgTransaction};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
@@ -189,6 +188,37 @@ impl<'tx> Publisher<PgTransaction<'tx>> {
 
         Ok(raw_message)
     }
+
+    pub async fn publish_many<M: Message>(
+        &mut self,
+        messages: &[M],
+    ) -> Result<Vec<RawMessage>, PublishError> {
+        let mut raw_messages = Vec::with_capacity(messages.len());
+
+        for message in messages {
+            let payload = serde_json::to_value(message).map_err(|error| {
+                PublishError::SerializationError {
+                    hash: M::HASH,
+                    name: M::NAME.to_string(),
+                    source: error,
+                }
+            })?;
+            let raw_message = RawMessage {
+                id: Uuid::now_v7(),
+                name: M::NAME.to_string(),
+                hash: M::HASH,
+                payload,
+                attempted: 0,
+            };
+            let raw_message = self
+                .queries
+                .publish_message(&mut self.executor, raw_message)
+                .await?;
+            raw_messages.push(raw_message);
+        }
+
+        Ok(raw_messages)
+    }
 }
 
 impl<'tx> Into<PgTransaction<'tx>> for Publisher<PgTransaction<'tx>> {
@@ -204,6 +234,10 @@ mod test {
     use crate::constants::FX_MQ_JOBS_SCHEMA_NAME;
     use chrono::Utc;
     use fx_mq_building_blocks::{migrator::run_migrations, testing_tools::TestMessage};
+    use serde::ser::{Error as SerError, SerializeStruct};
+    use serde::{Deserialize, Serialize, Serializer};
+    use std::time::Duration;
+    use uuid::Uuid;
 
     #[sqlx::test(migrations = false)]
     async fn it_publishes_using_a_pool(pool: sqlx::PgPool) -> anyhow::Result<()> {
@@ -269,5 +303,138 @@ mod test {
         assert!(is_pending);
 
         Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_publishes_many_using_a_transaction(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        run_migrations(&pool, FX_MQ_JOBS_SCHEMA_NAME).await?;
+
+        let queries = Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME));
+
+        let tx = pool.begin().await?;
+
+        let mut publisher = Publisher::<PgTransaction<'_>>::new(tx, &queries);
+
+        let inputs = vec![("first", 1), ("second", 2), ("third", 3)];
+        let messages: Vec<TestMessage> = inputs
+            .iter()
+            .map(|(message, value)| TestMessage::new((*message).to_string(), *value))
+            .collect();
+
+        let published = publisher.publish_many(&messages).await?;
+
+        assert_eq!(published.len(), inputs.len());
+
+        for ((expected_message, expected_value), raw) in inputs.iter().zip(published.iter()) {
+            assert_eq!(raw.name, TestMessage::NAME);
+            assert_eq!(raw.hash, TestMessage::HASH);
+            assert_eq!(
+                raw.payload,
+                serde_json::json!({"message": *expected_message, "value": *expected_value})
+            );
+        }
+
+        let tx: PgTransaction<'_> = publisher.into();
+        tx.commit().await?;
+
+        let now = Utc::now();
+        for raw in &published {
+            let mut check_tx = pool.begin().await?;
+            let is_pending = queries.is_pending(&mut check_tx, raw.id, now).await?;
+            check_tx.commit().await?;
+            assert!(is_pending);
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_rolls_back_publish_many_on_serialization_error(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        run_migrations(&pool, FX_MQ_JOBS_SCHEMA_NAME).await?;
+
+        let queries = Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME));
+
+        let tx = pool.begin().await?;
+
+        let mut publisher = Publisher::<PgTransaction<'_>>::new(tx, &queries);
+
+        let messages = vec![
+            FailingSerializationMessage::ok("first"),
+            FailingSerializationMessage::failing("second"),
+        ];
+
+        let error = publisher.publish_many(&messages).await.unwrap_err();
+
+        match error {
+            PublishError::SerializationError { hash, ref name, .. } => {
+                assert_eq!(hash, FailingSerializationMessage::HASH);
+                assert_eq!(name, FailingSerializationMessage::NAME);
+            }
+            _ => panic!("expected serialization error"),
+        }
+
+        let tx: PgTransaction<'_> = publisher.into();
+        tx.rollback().await?;
+
+        let mut check_tx = pool.begin().await?;
+        let pending = queries
+            .get_next_unattempted(
+                &mut check_tx,
+                Utc::now(),
+                Uuid::now_v7(),
+                Duration::from_secs(30),
+            )
+            .await?;
+        check_tx.commit().await?;
+
+        assert!(pending.is_none());
+
+        Ok(())
+    }
+
+    #[derive(Clone, Deserialize)]
+    struct FailingSerializationMessage {
+        label: String,
+        fail_on_serialize: bool,
+    }
+
+    impl FailingSerializationMessage {
+        fn ok(label: &'static str) -> Self {
+            Self {
+                label: label.to_string(),
+                fail_on_serialize: false,
+            }
+        }
+
+        fn failing(label: &'static str) -> Self {
+            Self {
+                label: label.to_string(),
+                fail_on_serialize: true,
+            }
+        }
+    }
+
+    impl Message for FailingSerializationMessage {
+        const NAME: &'static str = "FailingSerializationMessage";
+    }
+
+    impl Serialize for FailingSerializationMessage {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            if self.fail_on_serialize {
+                return Err(SerError::custom(format!(
+                    "intentional serialization failure for {}",
+                    self.label
+                )));
+            }
+
+            let mut state = serializer.serialize_struct("FailingSerializationMessage", 1)?;
+            state.serialize_field("label", &self.label)?;
+            state.end()
+        }
     }
 }
