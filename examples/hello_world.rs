@@ -1,4 +1,5 @@
 use fx_mq_jobs::{Handler, Message};
+use fx_pgmux::Multiplexer;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::{env, sync::Arc, time::Duration};
@@ -84,9 +85,15 @@ async fn main() -> anyhow::Result<()> {
     // the lease with this duration
     let hold_for = Duration::from_secs(2);
 
+    // Create a mutliplexer instance, ensuring we only get the messages we care about while only using a single underlying connection across multiple channels
+    let mut mux = Multiplexer::new(&pool).await?;
+
     // Create the listener, passing the job registry
     let mut listener =
         fx_mq_jobs::Listener::new(pool.clone(), job_registry, 2, host_id, hold_for).await?;
+
+    // Register the listener with the mux
+    listener.register_with_mux(&mut mux).await?;
 
     // Move the listener to a background task and start listening
     tokio::spawn(async move {

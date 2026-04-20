@@ -61,6 +61,8 @@ impl Handler for EmailHandler {
 let registry = RegistryBuilder::new()
     .with_handler(EmailHandler);
 
+let mut mux = Multiplexer::new(&pool).await?;
+
 let mut listener = Listener::new(
     pool,
     registry,
@@ -68,6 +70,8 @@ let mut listener = Listener::new(
     host_id,               // uuid of this host
     Duration::from_mins(5) // job lease duration
 ).await?;
+
+listener.register_with_mux(&mut mux).await?;
 
 // 4. Start processing
 listener.listen().await?;

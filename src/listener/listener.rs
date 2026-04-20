@@ -4,12 +4,12 @@ use crate::{
     listener::worker::{WorkerHandle, WorkerHandleError},
 };
 use chrono::{DateTime, Utc};
-use futures::StreamExt;
+use futures::{StreamExt, lock::Mutex};
 use fx_mq_building_blocks::{
     backoff::ExponentialBackoff, constants::FX_MQ_MESSAGE_NOTIFICATION_CHANNEL,
     listener::PollControlStream, queries::Queries,
 };
-use sqlx::{PgPool, postgres::PgListener};
+use sqlx::PgPool;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -18,10 +18,18 @@ use uuid::Uuid;
 pub enum ListenerError {
     #[error("DatabaseError {0}")]
     Database(#[from] sqlx::Error),
+
     #[error("IdleChannel missing")]
     IdleChannel,
+
     #[error("WorkerHandleError: {0}")]
     WorkerHandleError(#[from] WorkerHandleError),
+
+    #[error("Mux error {0}")]
+    Mux(#[from] fx_pgmux::Error),
+
+    #[error("No inbound stream")]
+    NoInboundStream,
 }
 
 /// Job listener that coordinates workers and database polling.
@@ -36,13 +44,16 @@ pub enum ListenerError {
 /// # use fx_mq_jobs::Listener;
 /// # use std::time::Duration;
 /// # use uuid::Uuid;
-/// #
+/// # use fx_pgmux::Multiplexer;
 /// # async fn example() -> anyhow::Result<()> {
 /// #     let pool = todo!();
 /// #     let registry = todo!();
 /// #     let host_id = Uuid::now_v7();
 /// #     let hold_for = Duration::from_mins(1);
 /// #
+///
+/// let mut mux = Multiplexer::new(&pool).await?;
+///
 /// let mut listener = Listener::new(
 ///     pool,
 ///     registry,
@@ -50,6 +61,8 @@ pub enum ListenerError {
 ///     host_id,
 ///     hold_for
 /// ).await?;
+///
+/// listener.register_with_mux(&mut mux).await?;
 ///
 /// listener.listen().await?;
 /// #     Ok(())
@@ -68,6 +81,8 @@ pub struct Listener {
     host_id: Uuid,
     /// The duration workers lease messages for
     hold_for: Duration,
+    /// Inbound stream
+    stream: Mutex<Option<fx_pgmux::NotificationStream>>,
 }
 
 impl Listener {
@@ -119,7 +134,19 @@ impl Listener {
             queries,
             host_id,
             hold_for,
+            stream: Mutex::new(None),
         })
+    }
+
+    /// Register this listener with a pgmux providing an inbound stream of muxed messages
+    pub async fn register_with_mux(
+        &mut self,
+        mux: &mut fx_pgmux::Multiplexer,
+    ) -> Result<(), ListenerError> {
+        let stream = mux.register(FX_MQ_MESSAGE_NOTIFICATION_CHANNEL).await?;
+        let mut lock = self.stream.lock().await;
+        lock.replace(stream);
+        Ok(())
     }
 
     /// Starts the job processing loop.
@@ -136,16 +163,20 @@ impl Listener {
         level = "debug"
     )]
     pub async fn listen(&mut self) -> Result<(), ListenerError> {
+        let stream = {
+            let mut lock = self.stream.lock().await;
+            let stream = lock.take();
+            let Some(stream) = stream else {
+                return Err(ListenerError::NoInboundStream);
+            };
+            stream
+        };
+
         // Set up polling control with exponential backoff (base 2, 2 second initial delay)
         let mut control =
             PollControlStream::new(ExponentialBackoff::new(2, Duration::from_secs(2)));
 
-        // Set up PostgreSQL LISTEN/NOTIFY for immediate job notifications
-        let mut listener = PgListener::connect_with(&self.pool).await?;
-        listener.listen(FX_MQ_MESSAGE_NOTIFICATION_CHANNEL).await?;
-        let pg_stream = listener.into_stream();
-
-        control.with_pg_stream(pg_stream);
+        control.with_inbound_stream(stream);
 
         while let Some(result) = control.next().await {
             if let Err(err) = result {
@@ -306,8 +337,12 @@ mod tests {
     };
     use chrono::Utc;
     use fx_mq_building_blocks::{migrator::run_migrations, models::Message, queries::Queries};
+    use fx_pgmux::Multiplexer;
     use sqlx::PgPool;
-    use std::{sync::Arc, time::Duration};
+    use std::{
+        sync::{Arc, atomic::AtomicBool},
+        time::Duration,
+    };
     use tokio::sync::oneshot;
     use uuid::Uuid;
 
@@ -349,12 +384,25 @@ mod tests {
         // Publish a message that will succeed directly
         let _published_3 = publisher.publish(&succeeding).await?;
 
+        let mut mux = Multiplexer::new(&pool).await?;
+
         let mut listener = Listener::new(pool, registry, 4, host_id, hold_for).await?;
+
+        listener.register_with_mux(&mut mux).await?;
+
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stopped_clone = stopped.clone();
 
         let (tx_stop, rx_stop) = oneshot::channel::<()>();
         let listen_handle = tokio::spawn(async move {
             tokio::select! {
-                result = listener.listen() => result,
+                result = listener.listen() => {match result {
+                    Ok(ok) => Ok(ok),
+                    Err(err) => {
+                        stopped_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                        Err(err)
+                    }
+                }},
                 _ = rx_stop => {
                     // it should be perfectly safe to abort here as we have already waited for 4 handle calls and we expect no more.
                     listener.stop(Duration::ZERO).await?;
@@ -366,14 +414,21 @@ mod tests {
         loop {
             let guard = state.lock().await;
 
+            if stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+
             // We expect exactly 4 handler calls
             if guard.len() == 4 {
                 break;
             }
         }
 
-        if let Err(_) = tx_stop.send(()) {
-            panic!("tx_stop returned an error");
+        // Only send stop signal if the task is still running
+        if !listen_handle.is_finished() {
+            if let Err(_) = tx_stop.send(()) {
+                panic!("tx_stop returned an error");
+            }
         }
 
         listen_handle.await??;

@@ -158,6 +158,7 @@ pub struct HandlerError {
 /// # use serde::{Serialize, Deserialize};
 /// # use sqlx::PgPool;
 /// # use uuid::Uuid;
+/// # use fx_pgmux::Multiplexer;
 /// #
 /// # #[derive(Serialize, Deserialize, Clone)]
 /// # struct EmailMessage { to: String, subject: String }
@@ -194,14 +195,18 @@ pub struct HandlerError {
 /// let registry_builder = RegistryBuilder::new()
 ///     .with_handler(EmailHandler);
 ///
+/// let mut mux = Multiplexer::new(&pool).await?;
+///
 /// // Pass builder to listener which completes the registry internally
 /// let mut listener = Listener::new(
-///     pool,
+///     pool.clone(),
 ///     registry_builder,
 ///     4,                     // worker count
 ///     Uuid::now_v7(),        // host_id
 ///     Duration::from_mins(5) // hold_for
 /// ).await?;
+///
+/// let mut mux = Multiplexer::new(&pool).await?;
 ///
 /// // Start processing jobs
 /// listener.listen().await?;
