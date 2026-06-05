@@ -58,6 +58,79 @@ pub struct Publisher<E> {
     queries: Arc<Queries>,
 }
 
+impl<'tx> Publisher<&'tx mut PgTransaction<'static>> {
+    pub fn new_tx(tx: &'tx mut PgTransaction<'static>, queries: &Arc<Queries>) -> Self {
+        Self {
+            executor: tx,
+            queries: queries.clone(),
+        }
+    }
+
+    #[tracing::instrument(
+        skip(self, message),
+        fields(
+            message_name = M::NAME,
+            hash = M::HASH
+        ),
+        level = "info",
+        err
+    )]
+    pub async fn publish<M: Message>(&mut self, message: &M) -> Result<RawMessage, PublishError> {
+        let payload =
+            serde_json::to_value(message).map_err(|error| PublishError::SerializationError {
+                hash: M::HASH,
+                name: M::NAME.to_string(),
+                source: error,
+            })?;
+
+        let raw_message = RawMessage {
+            id: Uuid::now_v7(),
+            name: M::NAME.to_string(),
+            hash: M::HASH,
+            payload,
+            attempted: 0,
+        };
+
+        let raw_message = self
+            .queries
+            .publish_message(&mut self.executor, raw_message)
+            .await?;
+
+        Ok(raw_message)
+    }
+
+    pub async fn publish_many<M: Message>(
+        &mut self,
+        messages: &[M],
+    ) -> Result<Vec<RawMessage>, PublishError> {
+        let mut raw_messages = Vec::with_capacity(messages.len());
+
+        for message in messages {
+            let payload = serde_json::to_value(message).map_err(|error| {
+                PublishError::SerializationError {
+                    hash: M::HASH,
+                    name: M::NAME.to_string(),
+                    source: error,
+                }
+            })?;
+            let raw_message = RawMessage {
+                id: Uuid::now_v7(),
+                name: M::NAME.to_string(),
+                hash: M::HASH,
+                payload,
+                attempted: 0,
+            };
+            let raw_message = self
+                .queries
+                .publish_message(&mut self.executor, raw_message)
+                .await?;
+            raw_messages.push(raw_message);
+        }
+
+        Ok(raw_messages)
+    }
+}
+
 impl Publisher<PgPool> {
     /// Creates a new pool-based publisher.
     ///
