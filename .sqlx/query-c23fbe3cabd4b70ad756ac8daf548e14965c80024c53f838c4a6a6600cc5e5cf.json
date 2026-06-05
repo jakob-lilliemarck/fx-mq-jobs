@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH message AS (\n            SELECT id\n            FROM messages_unattempted\n            WHERE id = $1\n\n            UNION ALL\n\n            SELECT id\n            FROM messages_attempted\n            WHERE id = $1\n        ),\n        attempts AS (\n            SELECT *\n            FROM attempts_failed af\n            WHERE af.message_id = $1\n        ),\n        leases AS (\n            SELECT *\n            FROM leases l\n            WHERE l.message_id = $1\n        ),\n        succeeded AS (\n            SELECT *\n            FROM attempts_succeeded s\n            WHERE s.message_id = $1\n        ),\n        dead AS (\n            SELECT *\n            FROM attempts_dead d\n            WHERE d.message_id = $1\n        ),\n        errors AS (\n            SELECT *\n            FROM errors e\n            WHERE e.message_id = $1\n        )\n        SELECT\n            -- True if message exists in unattempted table\n            EXISTS (SELECT 1 FROM messages_unattempted mu WHERE mu.id = $1) AS \"is_pending!\",\n\n            -- True if message exists in attempted table\n            EXISTS (SELECT 1 FROM messages_attempted ma WHERE ma.id = $1) AS \"is_attempted!\",\n\n            -- True if there are any leases (expired or active)\n            EXISTS (SELECT 1 FROM leases) AS \"has_any_lease!\",\n\n            -- True if there is a lease that has not expired yet\n            EXISTS (SELECT 1 FROM leases WHERE expires_at > $2) AS \"has_active_lease!\",\n\n            -- True if there are failed attempts\n            EXISTS (SELECT 1 FROM attempts) AS \"has_failed_attempts!\",\n\n            -- True if succeeded\n            EXISTS (SELECT 1 FROM succeeded) AS \"is_succeeded!\",\n\n            -- True if dead\n            EXISTS (SELECT 1 FROM dead) AS \"is_dead!\",\n\n            -- True if there are any errors\n            EXISTS (SELECT 1 FROM errors) AS \"has_errors!\";\n\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_pending!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "is_attempted!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "has_any_lease!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "has_active_lease!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "has_failed_attempts!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_succeeded!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_dead!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "has_errors!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c23fbe3cabd4b70ad756ac8daf548e14965c80024c53f838c4a6a6600cc5e5cf"
+}

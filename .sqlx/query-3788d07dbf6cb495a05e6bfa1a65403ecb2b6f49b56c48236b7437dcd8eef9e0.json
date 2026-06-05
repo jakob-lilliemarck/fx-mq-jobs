@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH del_leases AS (\n            DELETE FROM leases\n            WHERE message_id = $1\n        ),\n        del_failed AS (\n            DELETE FROM attempts_failed\n            WHERE message_id = $1\n        )\n        INSERT INTO attempts_succeeded (message_id, succeeded_at)\n        VALUES ($1, $2);\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3788d07dbf6cb495a05e6bfa1a65403ecb2b6f49b56c48236b7437dcd8eef9e0"
+}

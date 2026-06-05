@@ -103,31 +103,35 @@ impl<'tx> Publisher<&'tx mut PgTransaction<'static>> {
         &mut self,
         messages: &[M],
     ) -> Result<Vec<RawMessage>, PublishError> {
-        let mut raw_messages = Vec::with_capacity(messages.len());
-
-        for message in messages {
-            let payload = serde_json::to_value(message).map_err(|error| {
-                PublishError::SerializationError {
-                    hash: M::HASH,
-                    name: M::NAME.to_string(),
-                    source: error,
-                }
-            })?;
-            let raw_message = RawMessage {
-                id: Uuid::now_v7(),
-                name: M::NAME.to_string(),
-                hash: M::HASH,
-                payload,
-                attempted: 0,
-            };
-            let raw_message = self
-                .queries
-                .publish_message(&mut self.executor, raw_message)
-                .await?;
-            raw_messages.push(raw_message);
+        if messages.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(raw_messages)
+        let raw_messages: Vec<RawMessage> = messages
+            .iter()
+            .map(|message| {
+                let payload =
+                    serde_json::to_value(message).map_err(|error| PublishError::SerializationError {
+                        hash: M::HASH,
+                        name: M::NAME.to_string(),
+                        source: error,
+                    })?;
+                Ok(RawMessage {
+                    id: Uuid::now_v7(),
+                    name: M::NAME.to_string(),
+                    hash: M::HASH,
+                    payload,
+                    attempted: 0,
+                })
+            })
+            .collect::<Result<Vec<_>, PublishError>>()?;
+
+        let published = self
+            .queries
+            .publish_many_messages(&mut self.executor, &raw_messages)
+            .await?;
+
+        Ok(published)
     }
 }
 
@@ -266,31 +270,35 @@ impl<'tx> Publisher<PgTransaction<'tx>> {
         &mut self,
         messages: &[M],
     ) -> Result<Vec<RawMessage>, PublishError> {
-        let mut raw_messages = Vec::with_capacity(messages.len());
-
-        for message in messages {
-            let payload = serde_json::to_value(message).map_err(|error| {
-                PublishError::SerializationError {
-                    hash: M::HASH,
-                    name: M::NAME.to_string(),
-                    source: error,
-                }
-            })?;
-            let raw_message = RawMessage {
-                id: Uuid::now_v7(),
-                name: M::NAME.to_string(),
-                hash: M::HASH,
-                payload,
-                attempted: 0,
-            };
-            let raw_message = self
-                .queries
-                .publish_message(&mut self.executor, raw_message)
-                .await?;
-            raw_messages.push(raw_message);
+        if messages.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(raw_messages)
+        let raw_messages: Vec<RawMessage> = messages
+            .iter()
+            .map(|message| {
+                let payload =
+                    serde_json::to_value(message).map_err(|error| PublishError::SerializationError {
+                        hash: M::HASH,
+                        name: M::NAME.to_string(),
+                        source: error,
+                    })?;
+                Ok(RawMessage {
+                    id: Uuid::now_v7(),
+                    name: M::NAME.to_string(),
+                    hash: M::HASH,
+                    payload,
+                    attempted: 0,
+                })
+            })
+            .collect::<Result<Vec<_>, PublishError>>()?;
+
+        let published = self
+            .queries
+            .publish_many_messages(&mut self.executor, &raw_messages)
+            .await?;
+
+        Ok(published)
     }
 }
 

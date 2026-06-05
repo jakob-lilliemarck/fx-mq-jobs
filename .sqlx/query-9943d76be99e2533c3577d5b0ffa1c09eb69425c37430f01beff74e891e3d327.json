@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) FROM (\n            SELECT id FROM messages_unattempted\n            WHERE name = $1 AND payload @> $2\n\n            UNION ALL\n\n            SELECT ma.id FROM messages_attempted ma\n            LEFT JOIN attempts_succeeded s ON s.message_id = ma.id\n            LEFT JOIN attempts_dead d ON d.message_id = ma.id\n            WHERE ma.name = $1\n              AND ma.payload @> $2\n              AND s.message_id IS NULL\n              AND d.message_id IS NULL\n        ) matches\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9943d76be99e2533c3577d5b0ffa1c09eb69425c37430f01beff74e891e3d327"
+}
