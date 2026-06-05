@@ -178,11 +178,7 @@ impl Listener {
 
         control.with_inbound_stream(stream);
 
-        while let Some(result) = control.next().await {
-            if let Err(err) = result {
-                tracing::warn!(message="The control stream returned an error to the job listener", err=?err);
-            }
-
+        while let Some(true) = control.next().await {
             // Get a new timestamp
             let now = Utc::now();
 
