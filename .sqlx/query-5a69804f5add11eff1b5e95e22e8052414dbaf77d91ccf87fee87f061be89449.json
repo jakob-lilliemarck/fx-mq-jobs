@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH next_message AS (\n            DELETE FROM messages_unattempted\n            WHERE id = (\n                SELECT id\n                FROM messages_unattempted\n                ORDER BY published_at ASC, id ASC\n                FOR UPDATE SKIP LOCKED\n                LIMIT 1\n            )\n            RETURNING *\n        ),\n        leased AS (\n            INSERT INTO leases (\n                message_id,\n                acquired_at,\n                acquired_by,\n                expires_at\n            )\n            SELECT id, $1, $2, $3\n            FROM next_message\n            RETURNING message_id\n        ),\n        attempted AS (\n            INSERT INTO messages_attempted (\n                id,\n                name,\n                hash,\n                payload,\n                published_at\n            )\n            SELECT\n                id,\n                name,\n                hash,\n                payload,\n                published_at\n            FROM next_message\n            RETURNING\n                id,\n                name,\n                hash,\n                payload,\n                published_at\n        )\n        SELECT\n            id,\n            name,\n            hash,\n            payload,\n            0 \"attempted!:i32\"\n        FROM attempted;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "hash",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "attempted!:i32",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "5a69804f5add11eff1b5e95e22e8052414dbaf77d91ccf87fee87f061be89449"
+}

@@ -10,7 +10,7 @@ keywords = ["async", "jobs", "queue", "message-queue", "worker"]
 categories = ["database", "asynchronous"]
 
 [dependencies]
-fx-mq-building-blocks = { path = "/home/jakob/Projects/fx-mq-building-blocks" }
+fx-mq-building-blocks = { version = "0.1.14" }
 fx-pgmux = "0.1.2"
 sqlx = { version = "0.8", features = ["macros", "migrate", "runtime-tokio", "tls-rustls-ring", "postgres", "chrono", "uuid"] }
 serde = { version = "1.0.217", features = ["derive"] }

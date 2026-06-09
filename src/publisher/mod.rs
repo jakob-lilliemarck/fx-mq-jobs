@@ -110,12 +110,13 @@ impl<'tx> Publisher<&'tx mut PgTransaction<'static>> {
         let raw_messages: Vec<RawMessage> = messages
             .iter()
             .map(|message| {
-                let payload =
-                    serde_json::to_value(message).map_err(|error| PublishError::SerializationError {
+                let payload = serde_json::to_value(message).map_err(|error| {
+                    PublishError::SerializationError {
                         hash: M::HASH,
                         name: M::NAME.to_string(),
                         source: error,
-                    })?;
+                    }
+                })?;
                 Ok(RawMessage {
                     id: Uuid::now_v7(),
                     name: M::NAME.to_string(),
@@ -277,12 +278,13 @@ impl<'tx> Publisher<PgTransaction<'tx>> {
         let raw_messages: Vec<RawMessage> = messages
             .iter()
             .map(|message| {
-                let payload =
-                    serde_json::to_value(message).map_err(|error| PublishError::SerializationError {
+                let payload = serde_json::to_value(message).map_err(|error| {
+                    PublishError::SerializationError {
                         hash: M::HASH,
                         name: M::NAME.to_string(),
                         source: error,
-                    })?;
+                    }
+                })?;
                 Ok(RawMessage {
                     id: Uuid::now_v7(),
                     name: M::NAME.to_string(),

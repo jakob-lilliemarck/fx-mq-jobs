@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id \"id!\",\n            name \"name!\",\n            hash \"hash!\",\n            payload \"payload!\",\n            (SELECT COUNT(*)::INTEGER FROM attempts_failed af WHERE af.message_id = id) \"attempted!\"\n        FROM messages_unattempted\n        UNION ALL\n        SELECT\n            id \"id!\",\n            name \"name!\",\n            hash \"hash!\",\n            payload \"payload!\",\n            (SELECT COUNT(*)::INTEGER FROM attempts_failed af WHERE af.message_id = id) \"attempted!\"\n        FROM messages_attempted\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "hash!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "payload!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "attempted!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ed9d25bd22498c1987953bd5c6911bd028eb90b6140bfe7255816a4c08f9f8e0"
+}
